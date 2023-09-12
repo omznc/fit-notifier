@@ -1,4 +1,4 @@
-FROM arm64v8/python:3.9-slim-buster
+FROM mcr.microsoft.com/playwright/python:v1.37.0-jammy
 
 WORKDIR /app
 
@@ -6,8 +6,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-
-RUN playwright install firefox
 
 CMD ["python", "main.py"]
 

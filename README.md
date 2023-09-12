@@ -9,12 +9,7 @@ To use the application, follow these steps:
    - `USERNAME`: Your FIT BA student username.
    - `PASSWORD`: Your FIT BA student password.
    - `INTERVAL`: The interval (in seconds) between each scrape.
-4. Build the Docker image by running the following command:
+4. Start the application by running the following command:
    ```
-   docker compose build
+   docker compose up # You can use --build to force update the image after git pull
    ```
-5. Start the application by running the following command:
-   ```
-   docker compose up
-   ```
-6. The application will start scraping the FIT BA student portal for new posts and send notifications to the specified Discord webhook.
