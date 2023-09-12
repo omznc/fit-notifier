@@ -6,3 +6,5 @@ services:
     restart: on-failure
     volumes:
       - ./latest.txt:/app/latest.txt
+    env_file:
+      - .env
