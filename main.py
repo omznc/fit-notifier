@@ -117,21 +117,27 @@ if __name__ == "__main__":
 		with open(FILE_NAME, 'r') as f:
 			LATEST_HREF = f.read().strip()
 
-	with sync_playwright() as playwright:
-		firefox = playwright.firefox
-		browser = firefox.launch()
-		context = browser.new_context()
-		page = context.new_page()
-		login(page)
-		print("Logged in successfully. Starting to scrape...")
+	# Relogin every 30 minutes
+	while True:
+		with sync_playwright() as playwright:
+			firefox = playwright.firefox
+			browser = firefox.launch()
+			context = browser.new_context()
+			page = context.new_page()
+			login(page)
+			print("Logged in successfully. Starting to scrape...")
 
-		while True:
+			while True:
 
-			latest_post_details = get_latest_post_details(page)
+				latest_post_details = get_latest_post_details(page)
 
-			if latest_post_details is not None:
-				print('New post found!')
-				send_webhook(latest_post_details)
+				if latest_post_details is not None:
+					print('New post found!')
+					send_webhook(latest_post_details)
 
-			time.sleep(int(INTERVAL))
+				time.sleep(int(INTERVAL))
+
+		print("Logged in again.")
+		time.sleep(1800)
+
 
