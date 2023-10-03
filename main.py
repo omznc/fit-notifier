@@ -117,7 +117,6 @@ if __name__ == "__main__":
 		with open(FILE_NAME, 'r') as f:
 			LATEST_HREF = f.read().strip()
 
-	# Relogin every 10 minutes
 	while True:
 		with sync_playwright() as playwright:
 			firefox = playwright.firefox
@@ -127,8 +126,11 @@ if __name__ == "__main__":
 			login(page)
 			print("Logged in successfully. Starting to scrape...")
 
+			runs = 0
 			while True:
-
+				if runs == 60:
+					print("Relogging...")
+					break
 				latest_post_details = get_latest_post_details(page)
 
 				if latest_post_details is not None:
@@ -136,8 +138,7 @@ if __name__ == "__main__":
 					send_webhook(latest_post_details)
 
 				time.sleep(int(INTERVAL))
-
-		print("Logged in again.")
-		time.sleep(600)
+				runs += 1
+		print("Logged in!")
 
 
