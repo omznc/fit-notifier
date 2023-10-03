@@ -67,7 +67,7 @@ def send_webhook(details):
 		description=details['abstract'],
 		color=0x00ff00
 	)
-	timestamp = int(time.mktime(time.strptime(details["date"][:-2], "%d.%m.%Y %H:%M"))) + 7200
+	timestamp = int(time.mktime(time.strptime(details["date"][:-2], "%d.%m.%Y %H:%M"))) - 7200
 
 	if len(details['content']) < 2000:
 		embed.add_field(name='Content', value=details['content'], inline=False)
