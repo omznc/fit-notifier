@@ -83,7 +83,6 @@ def get_latest_post_details(page):
 def send_webhook(details):
 	embed = Embed(
 		title=details['title'],
-		description=details['abstract'],
 		color=0x00ff00
 	)
 	timestamp = int(time.mktime(time.strptime(details["date"][:-2], "%d.%m.%Y %H:%M"))) - 7200
