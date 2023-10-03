@@ -108,7 +108,7 @@ def send_webhook(details):
 		getenv('WEBHOOK_URL'),
 		json={
 			"embeds": [embed.to_dict()],
-			"content": "<@&1158896971709436014>",
+			"content": "<@&796116996000579644>",
 			"username": details['author'],
 			"avatar_url": AVATARS.get(details['author'].split(' ')[0], "https://ui-avatars.com/api/?name=" + details['author'].replace(' ', '+'))
 		},
