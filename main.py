@@ -15,7 +15,26 @@ INTERVAL = getenv('INTERVAL', 10)
 LATEST_HREF = None
 FILE_NAME = 'latest.txt'
 
-
+AVATARS = {
+    "Iris": "https://i.imgur.com/GGi41RP.jpg",
+    "Senad": "https://i.imgur.com/5daub51.jpg",
+    "Edina": "https://i.imgur.com/VSIBIdl.png",
+    "Elmir": "https://i.imgur.com/OzejLET.png",
+    "Denis": "https://i.imgur.com/tiqvWN8.png",
+    "Indira": "https://i.imgur.com/B7NLccc.png",
+    "Veldin": "https://i.imgur.com/kg6Q4qu.png",
+    "Dubravka": "https://i.imgur.com/qSRAJCk.png",
+    "Adil": "https://i.imgur.com/DvLFvle.jpg",
+    "Nina": "https://i.imgur.com/HRdnmeR.png",
+    "Sanja": "https://i.imgur.com/H3o1RCI.jpg",
+    "Migdat": "https://i.imgur.com/qBUvYTN.jpg",
+    "Lejla": "https://i.imgur.com/kxXOF5o.jpg",
+    "Elvir": "https://i.imgur.com/SjSWx4y.jpg",
+    "Haris": "https://i.imgur.com/DuWrvmU.png",
+    "Mohamed": "https://i.imgur.com/ITsfzfi.png",
+	"Goran": "https://i.imgur.com/iF9TdeP.png",
+	"Dražena": "https://i.imgur.com/rsJebKA.png",
+}
 def login(page):
 	page.goto("https://www.fit.ba/student/login.aspx")
 	page.type('#txtBrojDosijea', USERNAME)
@@ -88,7 +107,7 @@ def send_webhook(details):
 			"thread_name": f'{details["title"]}' if details["subject"] == '' else f'[{details["subject"]}] {details["title"]}',
 			"embeds": [embed.to_dict()],
 			"username": details['author'],
-			"avatar_url": "https://ui-avatars.com/api/?name=" + details['author'].replace(' ', '+'),
+			"avatar_url": AVATARS.get(details['author'].split(' ')[0], "https://ui-avatars.com/api/?name=" + details['author'].replace(' ', '+'))
 		},
 		headers={
 			"Content-Type": "application/json"
