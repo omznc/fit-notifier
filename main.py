@@ -104,7 +104,7 @@ def send_webhook(details):
 	response = requests.post(
 		getenv('WEBHOOK_URL'),
 		json={
-			"content": f"{details['author']} posted a new thread in {details['subject']}! {details['href']}",
+			"content": f"<@&796116996000579644> | {details['author']} posted a new thread{' in ' + details['subject'] if details['subject'] != '' else ''}!",
 			"thread_name": f'{details["title"]}' if details["subject"] == '' else f'[{details["subject"]}] {details["title"]}',
 			"embeds": [embed.to_dict()],
 			"username": details['author'],
