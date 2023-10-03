@@ -88,6 +88,9 @@ def send_webhook(details):
 	)
 	timestamp = int(time.mktime(time.strptime(details["date"][:-2], "%d.%m.%Y %H:%M"))) - 7200
 
+	# content can have multiple empty newline gaps, have 1 at most
+	details['content'] = '\n'.join([line for line in details['content'].split('\n') if line.strip() != ''])
+
 	if len(details['content']) < 2000:
 		embed.add_field(name='Content', value=details['content'], inline=False)
 	else:
