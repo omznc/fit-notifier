@@ -67,7 +67,7 @@ def send_webhook(details):
 		description=details['abstract'],
 		color=0x00ff00
 	)
-	timestamp = int(time.mktime(time.strptime(details["date"][:-2], "%d.%m.%Y %H:%M")))
+	timestamp = int(time.mktime(time.strptime(details["date"][:-2], "%d.%m.%Y %H:%M"))) + 7200
 
 	if len(details['content']) < 2000:
 		embed.add_field(name='Content', value=details['content'], inline=False)
@@ -85,7 +85,7 @@ def send_webhook(details):
 	response = requests.post(
 		getenv('WEBHOOK_URL'),
 		json={
-			"thread_name": f'[{details["subject"]}] {details["title"]}',
+			"thread_name": f'{details["title"]}' if details["subject"] == '' else f'[{details["subject"]}] {details["title"]}',
 			"embeds": [embed.to_dict()],
 			"username": details['author'],
 			"avatar_url": "https://ui-avatars.com/api/?name=" + details['author'].replace(' ', '+'),
