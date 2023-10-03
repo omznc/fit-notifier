@@ -117,7 +117,7 @@ if __name__ == "__main__":
 		with open(FILE_NAME, 'r') as f:
 			LATEST_HREF = f.read().strip()
 
-	# Relogin every 30 minutes
+	# Relogin every 10 minutes
 	while True:
 		with sync_playwright() as playwright:
 			firefox = playwright.firefox
@@ -138,6 +138,6 @@ if __name__ == "__main__":
 				time.sleep(int(INTERVAL))
 
 		print("Logged in again.")
-		time.sleep(1800)
+		time.sleep(600)
 
 
