@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright/python:v1.37.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.44.0-jammy
 
 WORKDIR /app
 
@@ -7,5 +7,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD ["python", "main.py"]
+RUN playwright install firefox
 
+CMD ["python", "main.py"]
