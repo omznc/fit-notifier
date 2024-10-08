@@ -7,6 +7,8 @@ from discord import Embed
 from playwright.sync_api import sync_playwright
 from unmarkd import unmark
 
+import re
+
 # Constants
 WEBHOOK_URL = getenv('WEBHOOK_URL')
 USERNAME = getenv('USERNAME')
@@ -68,6 +70,12 @@ def get_latest_post_details(page):
 
 	page.goto('https://www.fit.ba/student/default.aspx')
 
+	content = unmark(content.prettify());
+
+	cleanContent = re.compile('<.*?>');
+
+	content = re.sub(cleanContent, '', content);
+
 	return {
 		'href': href,
 		'title': ul.find('a', id='lnkNaslov').get_text(),
@@ -76,7 +84,7 @@ def get_latest_post_details(page):
 		'author': ul.find('a', id='HyperLink9').get_text(),
 		'email': ul.find('a', id='HyperLink9').get('href').replace('mailto:', ''),
 		'abstract': ul.find('div', class_='abstract').get_text().strip(),
-		'content': unmark(content.prettify())
+		'content': content
 	}
 
 # Function to send a Discord webhook with an embed
