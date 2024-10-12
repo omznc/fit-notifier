@@ -65,8 +65,8 @@ def get_latest_post_details(page):
 		return None
 	else:
 		LATEST_HREF = href
-		# with open(FILE_NAME, 'w') as file:
-		# 	file.write(LATEST_HREF)
+		with open(FILE_NAME, 'w') as file:
+			file.write(LATEST_HREF)
 
 	page.goto('https://www.fit.ba/student/' + href)
 	page.wait_for_selector('#Panel1')
