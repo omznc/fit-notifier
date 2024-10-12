@@ -1,3 +1,5 @@
+import io
+import json
 import time
 from os import getenv
 
@@ -6,6 +8,8 @@ from bs4 import BeautifulSoup
 from discord import Embed
 from playwright.sync_api import sync_playwright
 from unmarkd import unmark
+from PIL import Image
+
 
 import re
 
@@ -13,6 +17,8 @@ import re
 WEBHOOK_URL = getenv('WEBHOOK_URL')
 USERNAME = getenv('USERNAME')
 PASSWORD = getenv('PASSWORD')
+IMGUR_CLIENT_ID = getenv('IMGUR_CLIENT_ID')
+
 INTERVAL = getenv('INTERVAL', 10)
 LATEST_HREF = None
 FILE_NAME = 'latest.txt'
@@ -59,11 +65,46 @@ def get_latest_post_details(page):
 		return None
 	else:
 		LATEST_HREF = href
-		with open(FILE_NAME, 'w') as file:
-			file.write(LATEST_HREF)
+		# with open(FILE_NAME, 'w') as file:
+		# 	file.write(LATEST_HREF)
 
 	page.goto('https://www.fit.ba/student/' + href)
 	page.wait_for_selector('#Panel1')
+ 
+	page.evaluate('''
+			const panel = document.getElementById('Panel1');
+			panel.style.position = 'fixed';
+			panel.style.top = '0';
+			panel.style.left = '0';
+			panel.style.width = '100vw';
+			panel.style.height = '100vh';
+			panel.style.overflow = 'auto'; // Ensure the content scrolls if it's too large
+			panel.style.zIndex = '9999'; // Overlay it over everything
+			document.body.innerHTML = ''; // Remove all other content to focus on Panel1
+			document.body.style.display = 'flex'; // Make the body a flex container
+			document.body.style.flexDirection = 'column'; // Stack the content vertically
+			document.body.style.justifyContent = 'center'; // Center the content
+			document.body.style.alignItems = 'center'; // Center the content
+			document.body.style.background = 'white';
+			document.body.appendChild(panel); // Reattach Panel1 to the empty body
+		''')
+
+	screenshot = page.screenshot()
+	rgba_image = Image.open(io.BytesIO(screenshot)).convert('RGBA')
+
+	new_data = [
+		(255, 255, 255, 0) if item[:3] == (255, 255, 255) else item
+		for item in rgba_image.getdata()
+	]
+	rgba_image.putdata(new_data)
+
+	transparent_bbox = rgba_image.getbbox()
+	trimmed_image = rgba_image.crop(transparent_bbox)
+
+	new_size = (trimmed_image.width + 100, trimmed_image.height + 100)
+	white_background = Image.new("RGBA", new_size, (255, 255, 255, 255))
+	white_background.paste(trimmed_image, (50, 50), trimmed_image)
+
 	content = page.content()
 	content_soup = BeautifulSoup(content, 'html.parser')
 	content = content_soup.find('div', id='Panel1')
@@ -75,7 +116,8 @@ def get_latest_post_details(page):
 	cleanContent = re.compile('<.*?>');
 
 	content = re.sub(cleanContent, '', content);
-
+ 
+ 
 	return {
 		'href': href,
 		'title': ul.find('a', id='lnkNaslov').get_text(),
@@ -84,7 +126,8 @@ def get_latest_post_details(page):
 		'author': ul.find('a', id='HyperLink9').get_text(),
 		'email': ul.find('a', id='HyperLink9').get('href').replace('mailto:', ''),
 		'abstract': ul.find('div', class_='abstract').get_text().strip(),
-		'content': content
+		'content': content,
+		'image': white_background
 	}
 
 # Function to send a Discord webhook with an embed
@@ -110,30 +153,55 @@ def send_webhook(details):
 		embed.add_field(name='Subject', value=details['subject'], inline=False)
 	embed.add_field(name='Link', value=f'[Click here to open](https://www.fit.ba/student/{details["href"]})', inline=False)
 	embed.set_footer(text='01101111 01101101 01111010 01101110 01100011')
+ 
+	with io.BytesIO() as image_binary:
+		details['image'].save(image_binary, format='PNG')  # Save as PNG
+		image_binary.seek(0)  # Rewind the buffer to the beginning
 
-	response = requests.post(
-		getenv('WEBHOOK_URL'),
-		json={
-			"embeds": [embed.to_dict()],
-			"content": "<@&796116996000579644>",
-			"username": details['author'],
-			"avatar_url": AVATARS.get(details['author'].split(' ')[0], "https://ui-avatars.com/api/?name=" + details['author'].replace(' ', '+'))
-		},
-		headers={
-			"Content-Type": "application/json"
-		}
-	)
+        # Upload image to imgur
+		image_url = requests.post(
+            'https://api.imgur.com/3/image',
+            headers={
+                'Authorization': f'Client-ID {IMGUR_CLIENT_ID}'
+            },
+            files={
+                'image': image_binary
+            }
+        ).json()['data']['link']
 
-	if response.status_code == 204:
-		print("Discord webhook sent successfully.")
-	else:
-		print("Failed to send Discord webhook.")
+        # Add the image URL to the embed
+		embed.set_image(url=image_url)
+
+		response = requests.post(
+			WEBHOOK_URL,
+			json={
+				"embeds": [embed.to_dict()],
+				"content": "<@&796116996000579644>",
+				"username": details['author'],
+				"avatar_url": AVATARS.get(details['author'].split(' ')[0], "https://ui-avatars.com/api/?name=" + details['author'].replace(' ', '+'))
+			},
+			headers={
+				"Content-Type": "application/json"
+			}
+		)
+  
+		if response.status_code == 204:
+			print("Discord webhook sent successfully.")
+		else:
+			print("Failed to send Discord webhook.")
+
+	
+
+
+
+
+
 
 
 if __name__ == "__main__":
 
-	required_variables = ['WEBHOOK_URL', 'USERNAME', 'PASSWORD']
-	missing_variables = [var for var in required_variables if getenv(var) is None]
+	required_variables = [WEBHOOK_URL, USERNAME, PASSWORD, IMGUR_CLIENT_ID]
+	missing_variables = [var for var in required_variables if var is None]
 	if missing_variables:
 		for var in missing_variables:
 			print(f'{var} environment variable not set.')
