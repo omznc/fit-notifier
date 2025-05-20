@@ -15,3 +15,5 @@ To use the application, follow these steps:
    ```
    docker compose up # You can use --build to force update the image after git pull
    ```
+
+![image](https://github.com/user-attachments/assets/087abeb8-d93d-4a61-aa4d-52c808b965b5)
