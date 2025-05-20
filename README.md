@@ -1,5 +1,3 @@
-> This was done in ~20 minutes. Do not expect nice code.
-
 ## Usage
 
 To use the application, follow these steps:
