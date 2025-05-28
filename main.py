@@ -42,6 +42,8 @@ AVATARS = {
     "Mohamed": "https://i.imgur.com/ITsfzfi.png",
 	"Goran": "https://i.imgur.com/iF9TdeP.png",
 	"Dražena": "https://i.imgur.com/rsJebKA.png",
+ 	"Berun": "https://i.imgur.com/OLX4jOp.jpeg",
+ 	"Mabić": "https://i.imgur.com/NO54cZM.jpeg",
 }
 def login(page):
 	page.goto("https://www.fit.ba/student/login.aspx")
