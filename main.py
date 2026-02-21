@@ -19,6 +19,8 @@ WEBHOOK_URL = getenv('WEBHOOK_URL')
 IMPORTANT_WEBHOOK_URL = getenv('IMPORTANT_WEBHOOK_URL')
 DISCORD_BOT_TOKEN = getenv('DISCORD_BOT_TOKEN')
 DISCORD_GUILD_ID = getenv('DISCORD_GUILD_ID')
+DISCORD_ROLE_ID = getenv('DISCORD_ROLE_ID')
+DISCORD_IMPORTANT_ROLE_ID = getenv('DISCORD_IMPORTANT_ROLE_ID')
 FIT_USERNAME = getenv('FIT_USERNAME')
 FIT_PASSWORD = getenv('FIT_PASSWORD')
 IMGUR_CLIENT_ID = getenv('IMGUR_CLIENT_ID')
@@ -361,7 +363,7 @@ def send_important_date_webhook(event, details, event_url=None):
 			IMPORTANT_WEBHOOK_URL,
 			json={
 				'embeds': [embed.to_dict()],
-				'content': '<@&796116996000579644>'
+				'content': f'<@&{DISCORD_IMPORTANT_ROLE_ID}>' if DISCORD_IMPORTANT_ROLE_ID else ''
 			},
 			headers={'Content-Type': 'application/json'},
 			timeout=10
@@ -457,7 +459,7 @@ def send_webhook(details):
 			WEBHOOK_URL,
 			json={
 				"embeds": [embed.to_dict()],
-				"content": "<@&796116996000579644>",
+				"content": f"<@&{DISCORD_ROLE_ID}>" if DISCORD_ROLE_ID else '',
 				"username": details['author'],
 				"avatar_url": AVATARS.get(details['author'].split(' ')[0], "https://ui-avatars.com/api/?name=" + details['author'].replace(' ', '+'))
 			},
