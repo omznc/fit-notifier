@@ -4,9 +4,13 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: on-failure
-    volumes:
-      - ./latest.txt:/app/latest.txt
     environment:
-      USERNAME: ${USERNAME}
-      PASSWORD: ${PASSWORD}
+      FIT_USERNAME: ${FIT_USERNAME}
+      FIT_PASSWORD: ${FIT_PASSWORD}
       WEBHOOK_URL: ${WEBHOOK_URL}
+      IMPORTANT_WEBHOOK_URL: ${IMPORTANT_WEBHOOK_URL}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
+      IMGUR_CLIENT_ID: ${IMGUR_CLIENT_ID}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      INTERVAL: ${INTERVAL}
