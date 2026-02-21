@@ -1,2 +1,5 @@
-venv/
-.idea/
+latest.txt
+processed_events.json
+__pycache__/
+*.pyc
+.env

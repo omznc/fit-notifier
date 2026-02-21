@@ -4,3 +4,4 @@ discord.py
 playwright
 unmarkd
 pillow
+tzdata
