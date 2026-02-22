@@ -492,7 +492,7 @@ def process_important_dates(details):
 # Function to send a Discord webhook with an embed
 def send_webhook(details):
 	embed = Embed(
-		title=details['title'],
+		title=details['title'][:256],
 		color=0x00ff00
 	)
 	timestamp = int(time.mktime(time.strptime(details["date"][:-2], "%d.%m.%Y %H:%M"))) - 7200
@@ -500,16 +500,12 @@ def send_webhook(details):
 	# content can have multiple empty newline gaps, have 1 at most
 	details['content'] = '\n'.join([line for line in details['content'].split('\n') if line.strip() != ''])
 
-	if len(details['content']) < 2000:
-		embed.add_field(name='Content', value=details['content'], inline=False)
-	else:
-		embed.add_field(name='Content',
-		                value=f'Too long, click [here](https://www.fit.ba/student/{details["href"]}) to view the full post.',
-		                inline=False)
-	embed.add_field(name='Email', value=details['email'], inline=True)
+	content_val = details['content'] if len(details['content']) <= 1024 else f'Too long, [view full post](https://www.fit.ba/student/{details["href"]})'
+	embed.add_field(name='Content', value=content_val or '\u200b', inline=False)
+	embed.add_field(name='Email', value=(details['email'] or '\u200b')[:1024], inline=True)
 	embed.add_field(name='Posted', value=f'<t:{timestamp}:R>', inline=True)
 	if details['subject'] != '':
-		embed.add_field(name='Subject', value=details['subject'], inline=False)
+		embed.add_field(name='Subject', value=details['subject'][:1024], inline=False)
 	embed.add_field(name='Link', value=f'[Click here to open](https://www.fit.ba/student/{details["href"]})', inline=False)
 	embed.set_footer(text='01101111 01101101 01111010 01101110 01100011')
  
