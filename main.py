@@ -146,7 +146,7 @@ def get_latest_post_details(page):
 
 	new_data = [
 		(255, 255, 255, 0) if item[:3] == (255, 255, 255) else item
-		for item in rgba_image.getdata()
+		for item in rgba_image.get_flattened_data()
 	]
 	rgba_image.putdata(new_data)
 
@@ -531,23 +531,29 @@ def send_webhook(details):
         # Add the image URL to the embed
 		embed.set_image(url=image_url)
 
-		response = requests.post(
-			WEBHOOK_URL,
-			json={
-				"embeds": [embed.to_dict()],
-				"content": f"<@&{DISCORD_ROLE_ID}>" if DISCORD_ROLE_ID else '',
-				"username": details['author'],
-				"avatar_url": AVATARS.get(details['author'].split(' ')[0], "https://ui-avatars.com/api/?name=" + details['author'].replace(' ', '+'))
-			},
-			headers={
-				"Content-Type": "application/json"
-			}
-		)
-  
-		if response.status_code == 204:
-			print("Discord webhook sent successfully.")
-		else:
-			print("Failed to send Discord webhook.")
+		payload = {
+			"embeds": [embed.to_dict()],
+			"content": f"<@&{DISCORD_ROLE_ID}>" if DISCORD_ROLE_ID else '',
+			"username": details['author'],
+			"avatar_url": AVATARS.get(details['author'].split(' ')[0], "https://ui-avatars.com/api/?name=" + details['author'].replace(' ', '+'))
+		}
+		last_error = ""
+		for attempt in range(4):
+			try:
+				response = requests.post(WEBHOOK_URL, json=payload, headers={"Content-Type": "application/json"}, timeout=10)
+				if response.status_code == 204:
+					print("Discord webhook sent successfully.")
+					return
+				last_error = f"{response.status_code} {response.text[:500]}"
+				if response.status_code not in (429, 500, 502, 503, 504):
+					break
+			except requests.RequestException as e:
+				last_error = str(e)
+			if attempt < 3:
+				delay = 2 ** attempt
+				print(f"Webhook attempt {attempt + 1} failed, retrying in {delay}s...")
+				time.sleep(delay)
+		print(f"Failed to send Discord webhook after 4 attempts: {last_error}")
 
 	
 
