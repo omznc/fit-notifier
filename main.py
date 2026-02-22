@@ -5,8 +5,10 @@ import hashlib
 from os import getenv
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from urllib.parse import quote
 
 import requests
+from json_repair import loads as json_repair_loads
 from bs4 import BeautifulSoup
 from discord import Embed
 from playwright.sync_api import sync_playwright
@@ -180,93 +182,141 @@ def get_latest_post_details(page):
 		'image': white_background
 	}
 
+EVENTS_JSON_SCHEMA = {
+	'type': 'object',
+	'properties': {
+		'events': {
+			'type': 'array',
+			'items': {
+				'type': 'object',
+				'properties': {
+					'type': {'type': 'string', 'description': 'exam, grade_entry, semester_validation, consultation, or other'},
+					'date': {'type': 'string', 'description': 'YYYY-MM-DD'},
+					'time': {'type': 'string', 'description': 'HH:MM start time'},
+					'end_time': {'type': 'string', 'description': 'HH:MM end time when range exists (e.g. 15:00 do 18:00)'},
+					'title': {'type': 'string', 'description': 'Short event description'},
+					'location': {'type': 'string', 'description': 'Room or location'},
+					'subject': {'type': 'string', 'description': 'Course/subject name'}
+				},
+				'required': ['type', 'date', 'time', 'title', 'subject'],
+				'additionalProperties': False
+			}
+		}
+	},
+	'required': ['events'],
+	'additionalProperties': False
+}
+
+OPENROUTER_MODELS = [
+	'arcee-ai/trinity-large-preview:free',
+	'qwen/qwen3-4b:free',
+	'nvidia/nemotron-nano-9b-v2:free',
+	'arcee-ai/trinity-mini:free'
+]
+
 def extract_important_dates(details):
 	if not OPENROUTER_API_KEY:
 		print('  No OpenRouter API key, skipping date extraction')
 		return []
 	
-	prompt = f"""Analiziraj sljedeću objavu sa fakultetskog portala i izvuci važne datume.
+	prompt = f"""Analiziraj sljedeću objavu i izvuci važne datume.
 
 Post: "{details['title']}"
 Sadržaj: "{details['content']}"
 Datum objave: {details['date']}
 Predmet: {details['subject']}
 
-Traži specifične događaje:
-- Ispitni rokovi (ispit, test, kolokvij)
-- Upis ocjena
-- Ovjera semestra
-- Administrativni rokovi (prijave, konsultacije)
-
-Za svaki pronađeni događaj, vrati JSON u formatu:
-{{
-  "events": [
-    {{
-      "type": "exam|grade_entry|semester_validation|consultation|other",
-      "date": "YYYY-MM-DD",
-      "time": "HH:MM",
-      "title": "kratak opis",
-      "location": "učionica/lokacija ako postoji",
-      "subject": "naziv predmeta"
-    }}
-  ]
-}}
+Traži: ispitne rokove, upis ocjena, ovjeru semestra, administrativne rokove.
 
 Važno:
-- Datum objave je {details['date']}, koristi ga kao referencu
-- Svi datumi su u evropskom formatu (DD.MM.YYYY)
-- Vremenska zona je Europe/Sarajevo (CET/CEST)
-- Ako nema važnih datuma, vrati praznu listu
-- Ako je datum u prošlosti, ignoriši ga
+- Datum objave je {details['date']}, koristi kao referencu
+- Evropski format (DD.MM.YYYY), timezone Europe/Sarajevo
+- Ako postoji raspon (npr. "15:00h do 18:00h"), popuni time i end_time
+- Ignoriši datume u prošlosti
+- Ako nema važnih datuma, vrati praznu listu events"""
 
-Odgovori SAMO sa JSON objektom, bez dodatnog teksta."""
+	payload = {
+		'messages': [
+			{'role': 'system', 'content': 'Ti si asistent koji ekstrahira važne datume iz fakultetskih objava.'},
+			{'role': 'user', 'content': prompt}
+		],
+		'temperature': 0.1,
+		'max_tokens': 1000,
+		'response_format': {
+			'type': 'json_schema',
+			'json_schema': {
+				'name': 'important_dates',
+				'strict': True,
+				'schema': EVENTS_JSON_SCHEMA
+			}
+		}
+	}
 
-	try:
-		response = requests.post(
-			'https://openrouter.ai/api/v1/chat/completions',
-			headers={
-				'Authorization': f'Bearer {OPENROUTER_API_KEY}',
-				'Content-Type': 'application/json'
-			},
-			json={
-				'model': 'openrouter/auto',
-				'messages': [
-					{'role': 'system', 'content': 'Ti si asistent koji ekstrahira važne datume iz fakultetskih objava. Uvijek odgovaraš SAMO sa validnim JSON objektom, bez dodatnog teksta.'},
-					{'role': 'user', 'content': prompt}
-				],
-				'temperature': 0.1,
-				'max_tokens': 1000
-			},
-			timeout=30
-		)
-		
-		print(f'  OpenRouter status: {response.status_code}')
-		if response.status_code in (200, 201):
+	for model in OPENROUTER_MODELS:
+		try:
+			response = requests.post(
+				'https://openrouter.ai/api/v1/chat/completions',
+				headers={
+					'Authorization': f'Bearer {OPENROUTER_API_KEY}',
+					'Content-Type': 'application/json'
+				},
+				json={**payload, 'model': model},
+				timeout=30
+			)
+			print(f'  OpenRouter {model}: {response.status_code}')
+			if response.status_code not in (200, 201):
+				print(f'    Error: {response.text[:150]}')
+				continue
 			result = response.json()
-			content = result['choices'][0]['message']['content'].strip()
-			
-			if content.startswith('```json'):
-				content = content[7:]
-			if content.startswith('```'):
-				content = content[3:]
-			if content.endswith('```'):
-				content = content[:-3]
+			content = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+			if not content:
+				print(f'    Empty response')
+				continue
 			content = content.strip()
-			
-			print(f'  AI returned {len(content)} chars')
-			parsed = json.loads(content)
-			events = parsed.get('events', [])
-			print(f'  Extracted {len(events)} events')
+			if content.startswith('```'):
+				content = content.split('```')[1]
+				if content.startswith('json'):
+					content = content[4:]
+			content = content.strip()
+			parsed = json_repair_loads(content) if content else {}
+			events = parsed.get('events', []) if isinstance(parsed, dict) else []
+			events = _validate_events(events, details)
+			print(f'  Extracted {len(events)} valid events')
 			return events
-		else:
-			print(f'  OpenRouter error: {response.text[:200]}')
-	except Exception as e:
-		print(f'  AI extraction failed: {e}')
-		print(f'  Content was: {content[:500] if "content" in locals() else "N/A"}')
-		import traceback
-		traceback.print_exc()
-	
+		except requests.RequestException as e:
+			print(f'  {model} request failed: {e}')
+			continue
+		except Exception as e:
+			print(f'  {model} failed: {e}')
+			continue
 	return []
+
+def _validate_events(events, details):
+	valid = []
+	for i, e in enumerate(events if isinstance(events, list) else []):
+		if not isinstance(e, dict):
+			print(f'  Skipping invalid event {i}: not a dict')
+			continue
+		date = e.get('date')
+		title = e.get('title')
+		if not date or not title:
+			print(f'  Skipping event {i}: missing date or title')
+			continue
+		try:
+			datetime.strptime(str(date), '%Y-%m-%d')
+		except (ValueError, TypeError):
+			print(f'  Skipping event {i}: invalid date {date}')
+			continue
+		valid.append({
+			'type': e.get('type', 'other'),
+			'date': str(date),
+			'time': e.get('time') or '00:00',
+			'end_time': e.get('end_time'),
+			'title': str(title),
+			'location': e.get('location') or 'Nije navedeno',
+			'subject': e.get('subject') or details.get('subject', 'N/A')
+		})
+	return valid
 
 def create_discord_event(event, details):
 	if not DISCORD_BOT_TOKEN or not DISCORD_GUILD_ID:
@@ -277,6 +327,11 @@ def create_discord_event(event, details):
 		tz = ZoneInfo('Europe/Sarajevo')
 		event_dt = datetime.strptime(f"{event['date']} {event.get('time', '00:00')}", '%Y-%m-%d %H:%M')
 		event_dt = event_dt.replace(tzinfo=tz)
+		end_time = event.get('end_time')
+		if end_time:
+			end_dt = datetime.strptime(f"{event['date']} {end_time}", '%Y-%m-%d %H:%M').replace(tzinfo=tz)
+		else:
+			end_dt = event_dt + timedelta(hours=2)
 		
 		now = datetime.now(tz)
 		
@@ -287,8 +342,6 @@ def create_discord_event(event, details):
 		if event_dt > now + timedelta(days=180):
 			print(f'  Event too far in future, skipping: {event_dt}')
 			return None
-		
-		end_dt = event_dt + timedelta(hours=2)
 		
 		payload = {
 			'name': f"{event.get('subject', 'FIT')}: {event['title']}",
@@ -325,6 +378,26 @@ def create_discord_event(event, details):
 	
 	return None
 
+def _google_calendar_url(event, details):
+	tz = ZoneInfo('Europe/Sarajevo')
+	event_dt = datetime.strptime(f"{event['date']} {event.get('time', '00:00')}", '%Y-%m-%d %H:%M').replace(tzinfo=tz)
+	end_time = event.get('end_time')
+	if end_time:
+		end_dt = datetime.strptime(f"{event['date']} {end_time}", '%Y-%m-%d %H:%M').replace(tzinfo=tz)
+	else:
+		end_dt = event_dt + timedelta(hours=2)
+	start_str = event_dt.strftime('%Y%m%dT%H%M%S')
+	end_str = end_dt.strftime('%Y%m%dT%H%M%S')
+	params = {
+		'action': 'TEMPLATE',
+		'text': f"{event.get('subject', 'FIT')}: {event['title']}",
+		'dates': f'{start_str}/{end_str}',
+		'ctz': 'Europe/Sarajevo',
+		'details': details['content'][:500] + f"\n\nhttps://www.fit.ba/student/{details['href']}",
+		'location': event.get('location', '')
+	}
+	return 'https://calendar.google.com/calendar/render?' + '&'.join(f'{k}={quote(str(v))}' for k, v in params.items())
+
 def send_important_date_webhook(event, details, event_url=None):
 	if not IMPORTANT_WEBHOOK_URL:
 		return
@@ -347,23 +420,26 @@ def send_important_date_webhook(event, details, event_url=None):
 			title=f"{type_emojis.get(event['type'], '📌')} {event['title']}",
 			color=0xff6b6b
 		)
-		embed.add_field(name='Datum', value=f'<t:{timestamp}:F>', inline=True)
-		embed.add_field(name='Vrijeme', value=event.get('time', 'Nije navedeno'), inline=True)
+		embed.add_field(name='Termin', value=f'<t:{timestamp}:F> (<t:{timestamp}:R>)', inline=False)
 		embed.add_field(name='Predmet', value=event.get('subject', 'N/A'), inline=False)
 		embed.add_field(name='Lokacija', value=event.get('location', 'Nije navedeno'), inline=False)
+		embed.add_field(name='Dodaj u kalendar', value=f'[Google Calendar]({_google_calendar_url(event, details)})', inline=False)
 		embed.add_field(name='Izvorni post', value=f'[Vidi objavu](https://www.fit.ba/student/{details["href"]})', inline=False)
 		
 		if event_url:
 			embed.add_field(name='Discord Event', value=f'[Dodano u server kalendar]({event_url})', inline=False)
 		
 		embed.set_footer(text=f'Izvučeno iz objave: {details["title"]}')
-		embed.timestamp = datetime.now()
 		
+		author = details['author']
+		avatar = AVATARS.get(author.split(' ')[0], f"https://ui-avatars.com/api/?name={author.replace(' ', '+')}")
 		requests.post(
 			IMPORTANT_WEBHOOK_URL,
 			json={
 				'embeds': [embed.to_dict()],
-				'content': f'<@&{DISCORD_IMPORTANT_ROLE_ID}>' if DISCORD_IMPORTANT_ROLE_ID else ''
+				'content': f'<@&{DISCORD_IMPORTANT_ROLE_ID}>' if DISCORD_IMPORTANT_ROLE_ID else '',
+				'username': f'{author} (AI Summary)',
+				'avatar_url': avatar
 			},
 			headers={'Content-Type': 'application/json'},
 			timeout=10
@@ -372,7 +448,7 @@ def send_important_date_webhook(event, details, event_url=None):
 		print(f'Failed to send important date webhook: {e}')
 
 def hash_event(event):
-	event_str = f"{event['date']}-{event.get('time', '')}-{event['title']}-{event.get('subject', '')}"
+	event_str = f"{event.get('date', '')}-{event.get('time', '')}-{event.get('end_time', '')}-{event.get('title', '')}-{event.get('subject', '')}"
 	return hashlib.md5(event_str.encode()).hexdigest()
 
 def load_processed_events():
@@ -399,10 +475,10 @@ def process_important_dates(details):
 	for event in events:
 		event_hash = hash_event(event)
 		if event_hash in processed:
-			print(f'  Skipping already processed: {event["title"]}')
+			print(f'  Skipping already processed: {event.get("title", "?")}')
 			continue
 		
-		print(f'  Found important date: {event["title"]} on {event["date"]}')
+		print(f'  Found important date: {event.get("title", "?")} on {event.get("date")}')
 		event_url = create_discord_event(event, details)
 		send_important_date_webhook(event, details, event_url)
 		
