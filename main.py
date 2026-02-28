@@ -345,7 +345,7 @@ def create_discord_event(event, details):
 		
 		payload = {
 			'name': f"{event.get('subject', 'FIT')}: {event['title']}",
-			'description': f"{details['content'][:500]}\n\nIzvor: https://www.fit.ba/student/{details['href']}",
+			'description': f"{details['content'][:500]}\n\nIzvor: https://www.fit.ba/student/{details['href']}\n\nAI generirano - može biti neispravno",
 			'scheduled_start_time': event_dt.isoformat(),
 			'scheduled_end_time': end_dt.isoformat(),
 			'entity_type': 3,
@@ -423,13 +423,13 @@ def send_important_date_webhook(event, details, event_url=None):
 		embed.add_field(name='Termin', value=f'<t:{timestamp}:F> (<t:{timestamp}:R>)', inline=False)
 		embed.add_field(name='Predmet', value=event.get('subject', 'N/A'), inline=False)
 		embed.add_field(name='Lokacija', value=event.get('location', 'Nije navedeno'), inline=False)
-		embed.add_field(name='Dodaj u kalendar', value=f'[Google Calendar]({_google_calendar_url(event, details)})', inline=False)
-		embed.add_field(name='Izvorni post', value=f'[Vidi objavu](https://www.fit.ba/student/{details["href"]})', inline=False)
+		embed.add_field(name='Dodaj u kalendar', value=f'[Google Kalendar]({_google_calendar_url(event, details)})', inline=False)
+		embed.add_field(name='Izvorni post', value=f'[Pogledaj objavu](https://www.fit.ba/student/{details["href"]})', inline=False)
 		
 		if event_url:
-			embed.add_field(name='Discord Event', value=f'[Dodano u server kalendar]({event_url})', inline=False)
+			embed.add_field(name='Discord događaj', value=f'[Dodano u kalendar servera]({event_url})', inline=False)
 		
-		embed.set_footer(text=f'Izvučeno iz objave: {details["title"]}')
+		embed.set_footer(text=f'Izvučeno iz objave: {details["title"]}\nAI generirano - može biti neispravno')
 		
 		author = details['author']
 		avatar = AVATARS.get(author.split(' ')[0], f"https://ui-avatars.com/api/?name={author.replace(' ', '+')}")
@@ -438,7 +438,7 @@ def send_important_date_webhook(event, details, event_url=None):
 			json={
 				'embeds': [embed.to_dict()],
 				'content': f'<@&{DISCORD_IMPORTANT_ROLE_ID}>' if DISCORD_IMPORTANT_ROLE_ID else '',
-				'username': f'{author} (AI Summary)',
+			'username': f'{author} (AI sažetak)',
 				'avatar_url': avatar
 			},
 			headers={'Content-Type': 'application/json'},
@@ -500,14 +500,14 @@ def send_webhook(details):
 	# content can have multiple empty newline gaps, have 1 at most
 	details['content'] = '\n'.join([line for line in details['content'].split('\n') if line.strip() != ''])
 
-	content_val = details['content'] if len(details['content']) <= 1024 else f'Too long, [view full post](https://www.fit.ba/student/{details["href"]})'
-	embed.add_field(name='Content', value=content_val or '\u200b', inline=False)
+	content_val = details['content'] if len(details['content']) <= 1024 else f'Predugo, [pogledaj kompletnu objavu](https://www.fit.ba/student/{details["href"]})'
+	embed.add_field(name='Sadržaj', value=content_val or '\u200b', inline=False)
 	embed.add_field(name='Email', value=(details['email'] or '\u200b')[:1024], inline=True)
-	embed.add_field(name='Posted', value=f'<t:{timestamp}:R>', inline=True)
+	embed.add_field(name='Objavljeno', value=f'<t:{timestamp}:R>', inline=True)
 	if details['subject'] != '':
-		embed.add_field(name='Subject', value=details['subject'][:1024], inline=False)
-	embed.add_field(name='Link', value=f'[Click here to open](https://www.fit.ba/student/{details["href"]})', inline=False)
-	embed.set_footer(text='01101111 01101101 01111010 01101110 01100011')
+		embed.add_field(name='Predmet', value=details['subject'][:1024], inline=False)
+	embed.add_field(name='Link', value=f'[Klikni da otvoriš](https://www.fit.ba/student/{details["href"]})', inline=False)
+	embed.set_footer(text='Source: github.com/omznc/fit-notifier')
  
 	with io.BytesIO() as image_binary:
 		details['image'].save(image_binary, format='PNG')  # Save as PNG
