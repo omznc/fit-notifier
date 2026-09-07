@@ -208,10 +208,7 @@ EVENTS_JSON_SCHEMA = {
 }
 
 OPENROUTER_MODELS = [
-	'arcee-ai/trinity-large-preview:free',
-	'qwen/qwen3-4b:free',
-	'nvidia/nemotron-nano-9b-v2:free',
-	'arcee-ai/trinity-mini:free'
+	'openrouter/free'
 ]
 
 def extract_important_dates(details):
@@ -603,5 +600,4 @@ if __name__ == "__main__":
 				time.sleep(int(INTERVAL))
 				runs += 1
 		print("Logged in!")
-
 
