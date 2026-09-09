@@ -386,6 +386,8 @@ def create_discord_event(event, details):
 			end_dt = datetime.strptime(f"{event['date']} {end_time}", '%Y-%m-%d %H:%M').replace(tzinfo=tz)
 		else:
 			end_dt = event_dt + timedelta(hours=2)
+		if end_dt <= event_dt:
+			end_dt = event_dt + timedelta(hours=2)
 		
 		now = datetime.now(tz)
 		
