@@ -227,7 +227,8 @@ Traži: ispitne rokove, upis ocjena, ovjeru semestra, administrativne rokove.
 
 Važno:
 - Datum objave je {details['date']}, koristi kao referencu
-- Evropski format (DD.MM.YYYY), timezone Europe/Sarajevo
+- Objava koristi evropski format (DD.MM.YYYY), timezone Europe/Sarajevo
+- U odgovoru datum uvijek pisi kao YYYY-MM-DD, a vrijeme kao HH:MM
 - Ako postoji raspon (npr. "15:00h do 18:00h"), popuni time i end_time
 - Ignoriši datume u prošlosti
 - Ako nema važnih datuma, vrati praznu listu events"""
@@ -288,27 +289,74 @@ Važno:
 			continue
 	return []
 
+DATE_FORMATS = ('%Y-%m-%d', '%d.%m.%Y', '%d/%m/%Y', '%d-%m-%Y', '%Y/%m/%d')
+
+def _post_year(details):
+	try:
+		return datetime.strptime(str(details.get('date', ''))[:10], '%d.%m.%Y').year
+	except (ValueError, TypeError):
+		return datetime.now().year
+
+def _normalize_date(value, details):
+	raw = str(value or '').strip().rstrip('.')
+	if not raw:
+		return None
+	try:
+		return datetime.fromisoformat(raw).strftime('%Y-%m-%d')
+	except ValueError:
+		pass
+	for fmt in DATE_FORMATS:
+		try:
+			return datetime.strptime(raw, fmt).strftime('%Y-%m-%d')
+		except ValueError:
+			continue
+	for fmt in ('%d.%m', '%d/%m'):
+		try:
+			parsed = datetime.strptime(raw, fmt)
+		except ValueError:
+			continue
+		return parsed.replace(year=_post_year(details)).strftime('%Y-%m-%d')
+	return None
+
+def _normalize_time(value, default='00:00'):
+	raw = str(value or '').strip().lower()
+	for suffix in ('sati', 'sat', 'h'):
+		if raw.endswith(suffix):
+			raw = raw[:-len(suffix)].strip()
+			break
+	raw = raw.replace('.', ':').replace(',', ':')
+	if not raw:
+		return default
+	parts = raw.split(':')
+	try:
+		hour = int(parts[0])
+		minute = int(parts[1]) if len(parts) > 1 and parts[1] else 0
+	except ValueError:
+		return default
+	if not (0 <= hour <= 23 and 0 <= minute <= 59):
+		return default
+	return f'{hour:02d}:{minute:02d}'
+
 def _validate_events(events, details):
 	valid = []
 	for i, e in enumerate(events if isinstance(events, list) else []):
 		if not isinstance(e, dict):
 			print(f'  Skipping invalid event {i}: not a dict')
 			continue
-		date = e.get('date')
+		raw_date = e.get('date')
+		date = _normalize_date(raw_date, details)
 		title = e.get('title')
-		if not date or not title:
-			print(f'  Skipping event {i}: missing date or title')
+		if not title:
+			print(f'  Skipping event {i}: missing title')
 			continue
-		try:
-			datetime.strptime(str(date), '%Y-%m-%d')
-		except (ValueError, TypeError):
-			print(f'  Skipping event {i}: invalid date {date}')
+		if not date:
+			print(f'  Skipping event {i}: invalid date {raw_date}')
 			continue
 		valid.append({
 			'type': e.get('type', 'other'),
-			'date': str(date),
-			'time': e.get('time') or '00:00',
-			'end_time': e.get('end_time'),
+			'date': date,
+			'time': _normalize_time(e.get('time')),
+			'end_time': _normalize_time(e.get('end_time'), default=None),
 			'title': str(title),
 			'location': e.get('location') or 'Nije navedeno',
 			'subject': e.get('subject') or details.get('subject', 'N/A')
