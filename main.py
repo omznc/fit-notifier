@@ -208,6 +208,9 @@ EVENTS_JSON_SCHEMA = {
 }
 
 OPENROUTER_MODELS = [
+	'dots-studio/dots-3-note-preview:free',
+	'nex-agi/nex-n2.5-mini:free',
+	'nvidia/nemotron-3-super-120b-a12b:free',
 	'openrouter/free'
 ]
 
@@ -239,7 +242,8 @@ Važno:
 			{'role': 'user', 'content': prompt}
 		],
 		'temperature': 0.1,
-		'max_tokens': 1000,
+		'max_tokens': 2000,
+		'reasoning': {'enabled': False},
 		'response_format': {
 			'type': 'json_schema',
 			'json_schema': {
@@ -266,9 +270,11 @@ Važno:
 				print(f'    Error: {response.text[:150]}')
 				continue
 			result = response.json()
-			content = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+			choice = (result.get('choices') or [{}])[0]
+			finish_reason = choice.get('finish_reason')
+			content = (choice.get('message') or {}).get('content', '')
 			if not content:
-				print(f'    Empty response')
+				print(f'    Empty response (finish_reason={finish_reason})')
 				continue
 			content = content.strip()
 			if content.startswith('```'):
@@ -279,6 +285,9 @@ Važno:
 			parsed = json_repair_loads(content) if content else {}
 			events = parsed.get('events', []) if isinstance(parsed, dict) else []
 			events = _validate_events(events, details)
+			if not events and finish_reason == 'length':
+				print(f'    Truncated response, trying next model')
+				continue
 			print(f'  Extracted {len(events)} valid events')
 			return events
 		except requests.RequestException as e:
