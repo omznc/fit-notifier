@@ -35,7 +35,10 @@ FILE_NAME = os.path.join(STATE_DIR, 'latest.txt')
 EVENTS_FILE = os.path.join(STATE_DIR, 'processed_events.json')
 SEEN_LIMIT = int(getenv('SEEN_LIMIT', 200))
 INITIAL_BACKFILL = int(getenv('INITIAL_BACKFILL', 1))
+FORCE_BACKFILL = getenv('FORCE_BACKFILL', '').strip()
+MARKER_FILE = os.path.join(STATE_DIR, 'backfill.done')
 BASE_URL = 'https://www.fit.ba/student/'
+POST_PREFIX = 'obavijesti/opsirnije.aspx'
 
 AVATARS = {
     "Iris": "https://i.imgur.com/GGi41RP.jpg",
@@ -137,6 +140,22 @@ def mark_seen(hrefs):
 
 
 # Scraping functions
+def read_meta(node):
+	link = node.find('a', id='lnkNaslov')
+	author = node.find('a', id='HyperLink9')
+	date = node.find('span', id='lblDatum')
+	subject = node.find('span', id='lblPredmet')
+	abstract = node.find('div', class_='abstract')
+	return {
+		'title': ' '.join(link.get_text().split()) if link else '',
+		'date': date.get_text().strip() if date else '',
+		'subject': subject.get_text().strip() if subject else '',
+		'author': author.get_text().strip() if author else '',
+		'email': (author.get('href') or '').replace('mailto:', '') if author else '',
+		'abstract': abstract.get_text().strip() if abstract else ''
+	}
+
+
 def list_posts(page):
 	print("Reloading news page...")
 	page.goto(BASE_URL + 'default.aspx', timeout=60000)
@@ -148,25 +167,61 @@ def list_posts(page):
 	if ul is None:
 		raise SessionExpired(f'No newslist on {page.url}')
 
-	posts = []
+	# The news list carries the full metadata, but only for the newest post.
+	featured = {}
 	for item in ul.find_all('li') or [ul]:
 		link = item.find('a', id='lnkNaslov')
-		if link is None or not link.get('href'):
+		if link is not None and link.get('href'):
+			featured[normalize_href(link.get('href'))] = read_meta(item)
+
+	# The sidebar lists the recent posts, newest first.
+	posts = []
+	known = set()
+	for link in soup.find_all('a'):
+		href = normalize_href(link.get('href') or '')
+		if not href.startswith(POST_PREFIX) or href in known:
 			continue
-		author = item.find('a', id='HyperLink9')
-		date = item.find('span', id='lblDatum')
-		subject = item.find('span', id='lblPredmet')
-		abstract = item.find('div', class_='abstract')
-		posts.append({
-			'href': normalize_href(link.get('href')),
-			'title': link.get_text(),
-			'date': date.get_text() if date else '',
-			'subject': subject.get_text() if subject else '',
-			'author': author.get_text() if author else 'FIT',
-			'email': author.get('href', '').replace('mailto:', '') if author else '',
-			'abstract': abstract.get_text().strip() if abstract else ''
-		})
+		known.add(href)
+		post = {
+			'href': href,
+			'title': ' '.join(link.get_text().split()),
+			'date': '',
+			'subject': '',
+			'author': '',
+			'email': '',
+			'abstract': ''
+		}
+		post.update({key: value for key, value in featured.get(href, {}).items() if value})
+		posts.append(post)
 	return posts
+
+
+def apply_force_backfill(page):
+	if not FORCE_BACKFILL:
+		return
+	try:
+		count = int(FORCE_BACKFILL)
+	except ValueError:
+		print(f'Ignoring invalid FORCE_BACKFILL: {FORCE_BACKFILL}')
+		return
+	if count <= 0:
+		return
+	try:
+		with open(MARKER_FILE, 'r') as file:
+			applied = file.read().strip()
+	except OSError:
+		applied = ''
+	if applied == FORCE_BACKFILL:
+		print(f'Backfill of {count} posts is already applied.')
+		return
+
+	posts = list_posts(page)
+	older = [post['href'] for post in posts[count:]]
+	with open(FILE_NAME, 'w') as file:
+		file.write('\n'.join(reversed(older)) + ('\n' if older else ''))
+	with open(MARKER_FILE, 'w') as file:
+		file.write(FORCE_BACKFILL)
+	print(f'Forced backfill: {min(count, len(posts))} newest posts are unseen, {len(older)} older posts are seen.')
 
 
 def get_new_posts(page):
@@ -174,7 +229,7 @@ def get_new_posts(page):
 	print(f"Found {len(posts)} posts, newest: {posts[0]['href'] if posts else 'none'}")
 
 	seen = load_seen()
-	if seen:
+	if seen or os.path.exists(FILE_NAME):
 		new_posts = [post for post in posts if post['href'] not in seen]
 	else:
 		new_posts = posts[:INITIAL_BACKFILL]
@@ -195,6 +250,14 @@ def fetch_post_details(page, post):
 	page.goto(BASE_URL + href, timeout=60000)
 	print("Waiting for Panel1...")
 	page.wait_for_selector('#Panel1', timeout=30000)
+
+	post = dict(post)
+	meta = read_meta(BeautifulSoup(page.content(), 'html.parser'))
+	for key, value in meta.items():
+		if value and not post.get(key):
+			post[key] = value
+	if not post.get('author'):
+		post['author'] = 'FIT'
 
 	page.evaluate('''
 			const panel = document.getElementById('Panel1');
@@ -697,6 +760,7 @@ if __name__ == "__main__":
 				page = context.new_page()
 				login(page)
 				print("Logged in successfully. Starting to scrape...")
+				apply_force_backfill(page)
 
 				runs = 0
 				while True:

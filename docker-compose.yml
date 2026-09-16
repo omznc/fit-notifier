@@ -19,6 +19,7 @@ services:
       STATE_DIR: /app/data
       SEEN_LIMIT: ${SEEN_LIMIT:-200}
       INITIAL_BACKFILL: ${INITIAL_BACKFILL:-1}
+      FORCE_BACKFILL: ${FORCE_BACKFILL:-}
     volumes:
       - fit-notifier-data:/app/data
 
