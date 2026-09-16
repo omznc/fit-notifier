@@ -10,7 +10,7 @@ from urllib.parse import quote
 
 import requests
 from json_repair import loads as json_repair_loads
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 from discord import Embed
 from playwright.sync_api import sync_playwright
 from unmarkd import unmark
@@ -244,6 +244,20 @@ def get_new_posts(page):
 	return new_posts
 
 
+def read_content(page):
+	panel = BeautifulSoup(page.content(), 'html.parser').find('div', id='Panel1')
+	if panel is None:
+		return ''
+	for node in panel.find_all(string=lambda text: isinstance(text, Comment)):
+		node.extract()
+	try:
+		content = unmark(panel.prettify())
+	except Exception as e:
+		print(f'  Markdown conversion failed ({type(e).__name__}: {e}), using plain text')
+		content = panel.get_text('\n')
+	return re.sub(re.compile('<.*?>'), '', content)
+
+
 def fetch_post_details(page, post):
 	href = post['href']
 	print(f"Navigating to post: {BASE_URL}{href}")
@@ -277,28 +291,27 @@ def fetch_post_details(page, post):
 			document.body.appendChild(panel); // Reattach Panel1 to the empty body
 		''')
 
-	screenshot = page.screenshot()
-	rgba_image = Image.open(io.BytesIO(screenshot)).convert('RGBA')
+	try:
+		screenshot = page.screenshot()
+		rgba_image = Image.open(io.BytesIO(screenshot)).convert('RGBA')
 
-	new_data = [
-		(255, 255, 255, 0) if item[:3] == (255, 255, 255) else item
-		for item in rgba_image.get_flattened_data()
-	]
-	rgba_image.putdata(new_data)
+		new_data = [
+			(255, 255, 255, 0) if item[:3] == (255, 255, 255) else item
+			for item in rgba_image.get_flattened_data()
+		]
+		rgba_image.putdata(new_data)
 
-	transparent_bbox = rgba_image.getbbox()
-	trimmed_image = rgba_image.crop(transparent_bbox)
+		transparent_bbox = rgba_image.getbbox()
+		trimmed_image = rgba_image.crop(transparent_bbox)
 
-	new_size = (trimmed_image.width + 100, trimmed_image.height + 100)
-	white_background = Image.new("RGBA", new_size, (255, 255, 255, 255))
-	white_background.paste(trimmed_image, (50, 50), trimmed_image)
+		new_size = (trimmed_image.width + 100, trimmed_image.height + 100)
+		image = Image.new("RGBA", new_size, (255, 255, 255, 255))
+		image.paste(trimmed_image, (50, 50), trimmed_image)
+	except Exception as e:
+		print(f'  Screenshot failed, sending without the image: {e}')
+		image = None
 
-	content_soup = BeautifulSoup(page.content(), 'html.parser')
-	content = content_soup.find('div', id='Panel1')
-	content = unmark(content.prettify())
-	content = re.sub(re.compile('<.*?>'), '', content)
-
-	return {**post, 'content': content, 'image': white_background}
+	return {**post, 'content': read_content(page), 'image': image}
 
 
 EVENTS_JSON_SCHEMA = {
@@ -687,46 +700,46 @@ def send_webhook(details):
 	embed.add_field(name='Link', value=f'[Klikni da otvoriš](https://www.fit.ba/student/{details["href"]})', inline=False)
 	embed.set_footer(text='Source: github.com/omznc/fit-notifier')
  
-	with io.BytesIO() as image_binary:
-		details['image'].save(image_binary, format='PNG')  # Save as PNG
-		image_binary.seek(0)  # Rewind the buffer to the beginning
-
-        # Upload image to imgur
-		try:
-			image_url = requests.post(
-				'https://api.imgur.com/3/image',
-				headers={'Authorization': f'Client-ID {IMGUR_CLIENT_ID}'},
-				files={'image': image_binary},
-				timeout=30
-			).json()['data']['link']
-			embed.set_image(url=image_url)
-		except Exception as e:
-			print(f'Imgur upload failed, sending without the image: {e}')
-
-		payload = {
-			"embeds": [embed.to_dict()],
-			"content": f"<@&{DISCORD_ROLE_ID}>" if DISCORD_ROLE_ID else '',
-			"username": details['author'],
-			"avatar_url": AVATARS.get(details['author'].split(' ')[0], "https://ui-avatars.com/api/?name=" + details['author'].replace(' ', '+'))
-		}
-		last_error = ""
-		for attempt in range(4):
+	if details.get('image') is not None:
+		with io.BytesIO() as image_binary:
+			details['image'].save(image_binary, format='PNG')
+			image_binary.seek(0)
 			try:
-				response = requests.post(WEBHOOK_URL, json=payload, headers={"Content-Type": "application/json"}, timeout=10)
-				if response.status_code == 204:
-					print("Discord webhook sent successfully.")
-					return True
-				last_error = f"{response.status_code} {response.text[:500]}"
-				if response.status_code not in (429, 500, 502, 503, 504):
-					break
-			except requests.RequestException as e:
-				last_error = str(e)
-			if attempt < 3:
-				delay = 2 ** attempt
-				print(f"Webhook attempt {attempt + 1} failed, retrying in {delay}s...")
-				time.sleep(delay)
-		print(f"Failed to send Discord webhook after 4 attempts: {last_error}")
-		return False
+				image_url = requests.post(
+					'https://api.imgur.com/3/image',
+					headers={'Authorization': f'Client-ID {IMGUR_CLIENT_ID}'},
+					files={'image': image_binary},
+					timeout=30
+				).json()['data']['link']
+				embed.set_image(url=image_url)
+			except Exception as e:
+				print(f'Imgur upload failed, sending without the image: {e}')
+
+	author = details['author'] or 'FIT'
+	payload = {
+		"embeds": [embed.to_dict()],
+		"content": f"<@&{DISCORD_ROLE_ID}>" if DISCORD_ROLE_ID else '',
+		"username": author,
+		"avatar_url": AVATARS.get(author.split(' ')[0], "https://ui-avatars.com/api/?name=" + author.replace(' ', '+'))
+	}
+	last_error = ""
+	for attempt in range(4):
+		try:
+			response = requests.post(WEBHOOK_URL, json=payload, headers={"Content-Type": "application/json"}, timeout=10)
+			if response.status_code == 204:
+				print("Discord webhook sent successfully.")
+				return True
+			last_error = f"{response.status_code} {response.text[:500]}"
+			if response.status_code not in (429, 500, 502, 503, 504):
+				break
+		except requests.RequestException as e:
+			last_error = str(e)
+		if attempt < 3:
+			delay = 2 ** attempt
+			print(f"Webhook attempt {attempt + 1} failed, retrying in {delay}s...")
+			time.sleep(delay)
+	print(f"Failed to send Discord webhook after 4 attempts: {last_error}")
+	return False
 
 	
 
