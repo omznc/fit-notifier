@@ -14,3 +14,13 @@ services:
       IMGUR_CLIENT_ID: ${IMGUR_CLIENT_ID}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       INTERVAL: ${INTERVAL}
+      DISCORD_ROLE_ID: ${DISCORD_ROLE_ID}
+      DISCORD_IMPORTANT_ROLE_ID: ${DISCORD_IMPORTANT_ROLE_ID}
+      STATE_DIR: /app/data
+      SEEN_LIMIT: ${SEEN_LIMIT:-200}
+      INITIAL_BACKFILL: ${INITIAL_BACKFILL:-1}
+    volumes:
+      - fit-notifier-data:/app/data
+
+volumes:
+  fit-notifier-data:

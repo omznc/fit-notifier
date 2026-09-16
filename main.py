@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import time
 import hashlib
 from os import getenv
@@ -29,9 +30,12 @@ IMGUR_CLIENT_ID = getenv('IMGUR_CLIENT_ID')
 OPENROUTER_API_KEY = getenv('OPENROUTER_API_KEY')
 
 INTERVAL = getenv('INTERVAL', 10)
-LATEST_HREF = None
-FILE_NAME = 'latest.txt'
-EVENTS_FILE = 'processed_events.json'
+STATE_DIR = getenv('STATE_DIR', '.')
+FILE_NAME = os.path.join(STATE_DIR, 'latest.txt')
+EVENTS_FILE = os.path.join(STATE_DIR, 'processed_events.json')
+SEEN_LIMIT = int(getenv('SEEN_LIMIT', 200))
+INITIAL_BACKFILL = int(getenv('INITIAL_BACKFILL', 1))
+BASE_URL = 'https://www.fit.ba/student/'
 
 AVATARS = {
     "Iris": "https://i.imgur.com/GGi41RP.jpg",
@@ -98,31 +102,100 @@ def login(page):
 		raise
 
 
-# Scraping function to get the latest post details
-def get_latest_post_details(page):
+class SessionExpired(Exception):
+	pass
+
+
+def normalize_href(href):
+	href = str(href or '').strip()
+	for prefix in ('https://www.fit.ba/student/', 'https://fit.ba/student/', 'http://www.fit.ba/student/', 'http://fit.ba/student/', '/student/', '/'):
+		if href.startswith(prefix):
+			href = href[len(prefix):]
+			break
+	return href
+
+
+def load_seen():
+	try:
+		with open(FILE_NAME, 'r') as file:
+			return [normalize_href(line) for line in file if line.strip()]
+	except OSError:
+		return []
+
+
+def mark_seen(hrefs):
+	seen = load_seen()
+	for href in hrefs:
+		href = normalize_href(href)
+		if href not in seen:
+			seen.append(href)
+	seen = seen[-SEEN_LIMIT:]
+	temp_name = FILE_NAME + '.tmp'
+	with open(temp_name, 'w') as file:
+		file.write('\n'.join(seen) + '\n')
+	os.replace(temp_name, FILE_NAME)
+
+
+# Scraping functions
+def list_posts(page):
+	print("Reloading news page...")
+	page.goto(BASE_URL + 'default.aspx', timeout=60000)
+
 	print("Getting page content...")
-	html = page.content()
-	soup = BeautifulSoup(html, 'html.parser')
+	soup = BeautifulSoup(page.content(), 'html.parser')
 
-	print("Finding latest post...")
 	ul = soup.find('ul', class_='newslist')
-	href = ul.find('a', id='lnkNaslov').get('href')
-	print(f"Found post: {href}")
+	if ul is None:
+		raise SessionExpired(f'No newslist on {page.url}')
 
-	global LATEST_HREF
-	if href == LATEST_HREF:
-		print("No new post.")
-		return None
+	posts = []
+	for item in ul.find_all('li') or [ul]:
+		link = item.find('a', id='lnkNaslov')
+		if link is None or not link.get('href'):
+			continue
+		author = item.find('a', id='HyperLink9')
+		date = item.find('span', id='lblDatum')
+		subject = item.find('span', id='lblPredmet')
+		abstract = item.find('div', class_='abstract')
+		posts.append({
+			'href': normalize_href(link.get('href')),
+			'title': link.get_text(),
+			'date': date.get_text() if date else '',
+			'subject': subject.get_text() if subject else '',
+			'author': author.get_text() if author else 'FIT',
+			'email': author.get('href', '').replace('mailto:', '') if author else '',
+			'abstract': abstract.get_text().strip() if abstract else ''
+		})
+	return posts
+
+
+def get_new_posts(page):
+	posts = list_posts(page)
+	print(f"Found {len(posts)} posts, newest: {posts[0]['href'] if posts else 'none'}")
+
+	seen = load_seen()
+	if seen:
+		new_posts = [post for post in posts if post['href'] not in seen]
 	else:
-		LATEST_HREF = href
-		with open(FILE_NAME, 'w') as file:
-			file.write(LATEST_HREF)
+		new_posts = posts[:INITIAL_BACKFILL]
+		skipped = posts[INITIAL_BACKFILL:]
+		if skipped:
+			print(f'No state file. Marking {len(skipped)} older posts as seen.')
+			mark_seen([post['href'] for post in reversed(skipped)])
 
-	print(f"Navigating to post: https://www.fit.ba/student/{href}")
-	page.goto('https://www.fit.ba/student/' + href, timeout=60000)
+	if not new_posts:
+		print("No new post.")
+	new_posts.reverse()
+	return new_posts
+
+
+def fetch_post_details(page, post):
+	href = post['href']
+	print(f"Navigating to post: {BASE_URL}{href}")
+	page.goto(BASE_URL + href, timeout=60000)
 	print("Waiting for Panel1...")
 	page.wait_for_selector('#Panel1', timeout=30000)
- 
+
 	page.evaluate('''
 			const panel = document.getElementById('Panel1');
 			panel.style.position = 'fixed';
@@ -157,30 +230,13 @@ def get_latest_post_details(page):
 	white_background = Image.new("RGBA", new_size, (255, 255, 255, 255))
 	white_background.paste(trimmed_image, (50, 50), trimmed_image)
 
-	content = page.content()
-	content_soup = BeautifulSoup(content, 'html.parser')
+	content_soup = BeautifulSoup(page.content(), 'html.parser')
 	content = content_soup.find('div', id='Panel1')
+	content = unmark(content.prettify())
+	content = re.sub(re.compile('<.*?>'), '', content)
 
-	page.goto('https://www.fit.ba/student/default.aspx')
+	return {**post, 'content': content, 'image': white_background}
 
-	content = unmark(content.prettify());
-
-	cleanContent = re.compile('<.*?>');
-
-	content = re.sub(cleanContent, '', content);
- 
- 
-	return {
-		'href': href,
-		'title': ul.find('a', id='lnkNaslov').get_text(),
-		'date': ul.find('span', id='lblDatum').get_text(),
-		'subject': ul.find('span', id='lblPredmet').get_text(),
-		'author': ul.find('a', id='HyperLink9').get_text(),
-		'email': ul.find('a', id='HyperLink9').get('href').replace('mailto:', ''),
-		'abstract': ul.find('div', class_='abstract').get_text().strip(),
-		'content': content,
-		'image': white_background
-	}
 
 EVENTS_JSON_SCHEMA = {
 	'type': 'object',
@@ -551,7 +607,10 @@ def send_webhook(details):
 		title=details['title'][:256],
 		color=0x00ff00
 	)
-	timestamp = int(time.mktime(time.strptime(details["date"][:-2], "%d.%m.%Y %H:%M"))) - 7200
+	try:
+		timestamp = int(time.mktime(time.strptime(details["date"][:-2], "%d.%m.%Y %H:%M"))) - 7200
+	except ValueError:
+		timestamp = int(time.time())
 
 	# content can have multiple empty newline gaps, have 1 at most
 	details['content'] = '\n'.join([line for line in details['content'].split('\n') if line.strip() != ''])
@@ -570,18 +629,16 @@ def send_webhook(details):
 		image_binary.seek(0)  # Rewind the buffer to the beginning
 
         # Upload image to imgur
-		image_url = requests.post(
-            'https://api.imgur.com/3/image',
-            headers={
-                'Authorization': f'Client-ID {IMGUR_CLIENT_ID}'
-            },
-            files={
-                'image': image_binary
-            }
-        ).json()['data']['link']
-
-        # Add the image URL to the embed
-		embed.set_image(url=image_url)
+		try:
+			image_url = requests.post(
+				'https://api.imgur.com/3/image',
+				headers={'Authorization': f'Client-ID {IMGUR_CLIENT_ID}'},
+				files={'image': image_binary},
+				timeout=30
+			).json()['data']['link']
+			embed.set_image(url=image_url)
+		except Exception as e:
+			print(f'Imgur upload failed, sending without the image: {e}')
 
 		payload = {
 			"embeds": [embed.to_dict()],
@@ -595,7 +652,7 @@ def send_webhook(details):
 				response = requests.post(WEBHOOK_URL, json=payload, headers={"Content-Type": "application/json"}, timeout=10)
 				if response.status_code == 204:
 					print("Discord webhook sent successfully.")
-					return
+					return True
 				last_error = f"{response.status_code} {response.text[:500]}"
 				if response.status_code not in (429, 500, 502, 503, 504):
 					break
@@ -606,6 +663,7 @@ def send_webhook(details):
 				print(f"Webhook attempt {attempt + 1} failed, retrying in {delay}s...")
 				time.sleep(delay)
 		print(f"Failed to send Discord webhook after 4 attempts: {last_error}")
+		return False
 
 	
 
@@ -623,40 +681,55 @@ if __name__ == "__main__":
 		for var in missing_variables:
 			print(f'{var} environment variable not set.')
 		exit(1)
-	import os
 
+	if STATE_DIR != '.':
+		os.makedirs(STATE_DIR, exist_ok=True)
 	if os.path.isdir(FILE_NAME):
 		os.rmdir(FILE_NAME)
-		LATEST_HREF = None
-	elif not os.path.exists(FILE_NAME):
-		LATEST_HREF = None
-	else:
-		with open(FILE_NAME, 'r') as f:
-			LATEST_HREF = f.read().strip()
+	print(f'State directory: {os.path.abspath(STATE_DIR)} ({len(load_seen())} posts seen)')
 
 	while True:
-		with sync_playwright() as playwright:
-			firefox = playwright.firefox
-			browser = firefox.launch()
-			context = browser.new_context()
-			page = context.new_page()
-			login(page)
-			print("Logged in successfully. Starting to scrape...")
+		try:
+			with sync_playwright() as playwright:
+				firefox = playwright.firefox
+				browser = firefox.launch()
+				context = browser.new_context()
+				page = context.new_page()
+				login(page)
+				print("Logged in successfully. Starting to scrape...")
 
-			runs = 0
-			while True:
-				if runs == 60:
-					print("Relogging...")
-					break
-				latest_post_details = get_latest_post_details(page)
+				runs = 0
+				while True:
+					if runs == 60:
+						print("Relogging...")
+						break
+					try:
+						new_posts = get_new_posts(page)
+					except SessionExpired as e:
+						print(f"Session expired, relogging: {e}")
+						break
 
-				if latest_post_details is not None:
-					print('New post found!')
-					send_webhook(latest_post_details)
-					print('Checking for important dates...')
-					process_important_dates(latest_post_details)
+					if new_posts:
+						print(f'{len(new_posts)} new post(s) found!')
 
-				time.sleep(int(INTERVAL))
-				runs += 1
-		print("Logged in!")
+					for post in new_posts:
+						try:
+							details = fetch_post_details(page, post)
+						except Exception as e:
+							print(f'Failed to read post {post["href"]}: {e}')
+							break
+						if not send_webhook(details):
+							print('Webhook failed. The post stays unseen and the next run retries it.')
+							break
+						mark_seen([post['href']])
+						print('Checking for important dates...')
+						try:
+							process_important_dates(details)
+						except Exception as e:
+							print(f'Failed to process important dates: {e}')
 
+					time.sleep(int(INTERVAL))
+					runs += 1
+		except Exception as e:
+			print(f'Run failed, restarting the browser: {type(e).__name__}: {e}')
+			time.sleep(int(INTERVAL))
