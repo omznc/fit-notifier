@@ -1,6 +1,6 @@
 requests
 beautifulsoup4
-json-repair
+anthropic
 discord.py
 playwright
 unmarkd

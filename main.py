@@ -8,8 +8,8 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from urllib.parse import quote
 
+import anthropic
 import requests
-from json_repair import loads as json_repair_loads
 from bs4 import BeautifulSoup, Comment
 from discord import Embed
 from playwright.sync_api import sync_playwright
@@ -27,7 +27,7 @@ DISCORD_IMPORTANT_ROLE_ID = getenv('DISCORD_IMPORTANT_ROLE_ID')
 FIT_USERNAME = getenv('FIT_USERNAME')
 FIT_PASSWORD = getenv('FIT_PASSWORD')
 IMGUR_CLIENT_ID = getenv('IMGUR_CLIENT_ID')
-OPENROUTER_API_KEY = getenv('OPENROUTER_API_KEY')
+ANTHROPIC_API_KEY = getenv('ANTHROPIC_API_KEY')
 
 INTERVAL = getenv('INTERVAL', 10)
 STATE_DIR = getenv('STATE_DIR', '.')
@@ -339,22 +339,19 @@ EVENTS_JSON_SCHEMA = {
 	'additionalProperties': False
 }
 
-OPENROUTER_MODELS = [
-	'dots-studio/dots-3-note-preview:free',
-	'nex-agi/nex-n2.5-mini:free',
-	'nvidia/nemotron-3-super-120b-a12b:free',
-	'openrouter/free'
-]
+CLAUDE_MODEL = 'claude-haiku-5-5'
+MAX_CONTENT_CHARS = 20000
 
 def extract_important_dates(details):
-	if not OPENROUTER_API_KEY:
-		print('  No OpenRouter API key, skipping date extraction')
+	if not ANTHROPIC_API_KEY:
+		print('  No Anthropic API key, skipping date extraction')
 		return []
-	
+
+	content = str(details['content'])[:MAX_CONTENT_CHARS]
 	prompt = f"""Analiziraj sljedeću objavu i izvuci važne datume.
 
 Post: "{details['title']}"
-Sadržaj: "{details['content']}"
+Sadržaj: "{content}"
 Datum objave: {details['date']}
 Predmet: {details['subject']}
 
@@ -368,67 +365,35 @@ Važno:
 - Ignoriši datume u prošlosti
 - Ako nema važnih datuma, vrati praznu listu events"""
 
-	payload = {
-		'messages': [
-			{'role': 'system', 'content': 'Ti si asistent koji ekstrahira važne datume iz fakultetskih objava.'},
-			{'role': 'user', 'content': prompt}
-		],
-		'temperature': 0.1,
-		'max_tokens': 2000,
-		'reasoning': {'enabled': False},
-		'response_format': {
-			'type': 'json_schema',
-			'json_schema': {
-				'name': 'important_dates',
-				'strict': True,
-				'schema': EVENTS_JSON_SCHEMA
+	try:
+		client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=60)
+		response = client.messages.create(
+			model=CLAUDE_MODEL,
+			max_tokens=4096,
+			system='Ti si asistent koji ekstrahira važne datume iz fakultetskih objava.',
+			messages=[{'role': 'user', 'content': prompt}],
+			output_config={
+				'effort': 'low',
+				'format': {'type': 'json_schema', 'schema': EVENTS_JSON_SCHEMA}
 			}
-		}
-	}
+		)
+	except anthropic.APIError as e:
+		print(f'  Claude request failed: {e}')
+		return []
 
-	for model in OPENROUTER_MODELS:
-		try:
-			response = requests.post(
-				'https://openrouter.ai/api/v1/chat/completions',
-				headers={
-					'Authorization': f'Bearer {OPENROUTER_API_KEY}',
-					'Content-Type': 'application/json'
-				},
-				json={**payload, 'model': model},
-				timeout=30
-			)
-			print(f'  OpenRouter {model}: {response.status_code}')
-			if response.status_code not in (200, 201):
-				print(f'    Error: {response.text[:150]}')
-				continue
-			result = response.json()
-			choice = (result.get('choices') or [{}])[0]
-			finish_reason = choice.get('finish_reason')
-			content = (choice.get('message') or {}).get('content', '')
-			if not content:
-				print(f'    Empty response (finish_reason={finish_reason})')
-				continue
-			content = content.strip()
-			if content.startswith('```'):
-				content = content.split('```')[1]
-				if content.startswith('json'):
-					content = content[4:]
-			content = content.strip()
-			parsed = json_repair_loads(content) if content else {}
-			events = parsed.get('events', []) if isinstance(parsed, dict) else []
-			events = _validate_events(events, details)
-			if not events and finish_reason == 'length':
-				print(f'    Truncated response, trying next model')
-				continue
-			print(f'  Extracted {len(events)} valid events')
-			return events
-		except requests.RequestException as e:
-			print(f'  {model} request failed: {e}')
-			continue
-		except Exception as e:
-			print(f'  {model} failed: {e}')
-			continue
-	return []
+	if response.stop_reason in ('max_tokens', 'refusal'):
+		print(f'  Claude stopped early (stop_reason={response.stop_reason})')
+		return []
+	text = ''.join(block.text for block in response.content if block.type == 'text')
+	try:
+		parsed = json.loads(text)
+	except json.JSONDecodeError as e:
+		print(f'  Claude returned invalid JSON: {e}')
+		return []
+	events = parsed.get('events', []) if isinstance(parsed, dict) else []
+	events = _validate_events(events, details)
+	print(f'  Extracted {len(events)} valid events')
+	return events
 
 DATE_FORMATS = ('%Y-%m-%d', '%d.%m.%Y', '%d/%m/%Y', '%d-%m-%Y', '%Y/%m/%d')
 
