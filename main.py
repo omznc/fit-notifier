@@ -28,6 +28,11 @@ FIT_USERNAME = getenv('FIT_USERNAME')
 FIT_PASSWORD = getenv('FIT_PASSWORD')
 IMGUR_CLIENT_ID = getenv('IMGUR_CLIENT_ID')
 ANTHROPIC_API_KEY = getenv('ANTHROPIC_API_KEY')
+REDDIT_CLIENT_ID = getenv('REDDIT_CLIENT_ID')
+REDDIT_CLIENT_SECRET = getenv('REDDIT_CLIENT_SECRET')
+REDDIT_USERNAME = getenv('REDDIT_USERNAME')
+REDDIT_PASSWORD = getenv('REDDIT_PASSWORD')
+REDDIT_SUBREDDIT = getenv('REDDIT_SUBREDDIT') or 'FITMostar'
 
 INTERVAL = getenv('INTERVAL', 10)
 STATE_DIR = getenv('STATE_DIR', '.')
@@ -677,6 +682,7 @@ def send_webhook(details):
 					timeout=30
 				).json()['data']['link']
 				embed.set_image(url=image_url)
+				details['image_url'] = image_url
 			except Exception as e:
 				print(f'Imgur upload failed, sending without the image: {e}')
 
@@ -705,6 +711,46 @@ def send_webhook(details):
 			time.sleep(delay)
 	print(f"Failed to send Discord webhook after 4 attempts: {last_error}")
 	return False
+
+
+def reddit_body(details):
+	link = f'https://www.fit.ba/student/{details["href"]}'
+	lines = [f'**Autor:** {details["author"] or "FIT"}']
+	if details.get('subject'):
+		lines.append(f'**Predmet:** {details["subject"]}')
+	if details.get('image_url'):
+		lines.append(f'[Slika objave]({details["image_url"]})')
+	# Reddit markdown joins single newlines, so keep each line as a paragraph.
+	lines += [line for line in details['content'].split('\n') if line.strip()]
+	lines.append(f'[Originalna objava]({link})')
+	return '\n\n'.join(lines)[:40000]
+
+
+def post_to_reddit(details):
+	user_agent = f'fit-notifier/1.0 (by /u/{REDDIT_USERNAME})'
+	token = requests.post(
+		'https://www.reddit.com/api/v1/access_token',
+		auth=(REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET),
+		data={'grant_type': 'password', 'username': REDDIT_USERNAME, 'password': REDDIT_PASSWORD},
+		headers={'User-Agent': user_agent},
+		timeout=10
+	).json()['access_token']
+	response = requests.post(
+		'https://oauth.reddit.com/api/submit',
+		headers={'Authorization': f'bearer {token}', 'User-Agent': user_agent},
+		data={
+			'sr': REDDIT_SUBREDDIT,
+			'kind': 'self',
+			'title': details['title'][:300],
+			'text': reddit_body(details),
+			'api_type': 'json',
+		},
+		timeout=15
+	)
+	errors = response.json().get('json', {}).get('errors')
+	if response.status_code != 200 or errors:
+		raise RuntimeError(f'{response.status_code} {errors or response.text[:500]}')
+	print(f"Reddit post created: {response.json()['json']['data']['url']}")
 
 	
 
@@ -764,6 +810,11 @@ if __name__ == "__main__":
 							print('Webhook failed. The post stays unseen and the next run retries it.')
 							break
 						mark_seen([post['href']])
+						if REDDIT_CLIENT_ID:
+							try:
+								post_to_reddit(details)
+							except Exception as e:
+								print(f'Failed to post to Reddit: {e}')
 						print('Checking for important dates...')
 						try:
 							process_important_dates(details)
